@@ -1005,8 +1005,30 @@ body.menu-open, html:has(body.menu-open) {
 })();
 </script>
 <script>window.__NUXT__={};window.__NUXT__.config={public:{googleRecaptchaPublicKey:"6LecXf4qAAAAAJt9jM09RXDs-s2fAlkskEBGnaxT",prismic:{endpoint:"vorszk",environment:"",clientConfig:{},client:"~/app/prismic/client",linkResolver:"~/app/prismic/linkResolver",richTextSerializer:"~/app/prismic/richTextSerializer",injectComponents:true,components:{linkRel:"~/app/prismic/linkRel",richTextComponents:"~/app/prismic/richTextComponents",sliceZoneDefaultComponent:"~/app/prismic/sliceZoneDefaultComponent"},preview:false,toolbar:false,devtools:true},device:{defaultUserAgent:"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.39 Safari/537.36",enabled:true,refreshOnResize:false},i18n:{baseUrl:"https://vorskz.com",defaultLocale:"en",defaultDirection:"ltr",strategy:"prefix_except_default",lazy:false,rootRedirect:"",routesNameSeparator:"___",defaultLocaleRouteNameSuffix:"default",skipSettingLocaleOnNavigate:false,differentDomains:false,trailingSlash:false,locales:[{code:"en",language:"en-US",iso:"en-US"},{code:"pt",language:"pt-BR",iso:"pt-BR"}],detectBrowserLanguage:false,experimental:{localeDetector:"",switchLocalePathLinkSSR:false,autoImportTranslationFunctions:false,typedPages:true,typedOptionsAndMessages:false,generatedLocaleFilePathFormat:"absolute"},multiDomainLocales:false}},app:{baseURL:"/",buildId:"77fe3c84-d1cd-468a-ac22-457ca36ec63a",buildAssetsDir:"/_nuxt/",cdnURL:""}}</script>
-<script>
-// Garante loop contínuo e autoplay em todos os vídeos dos cards e do menu
+<style id="custom-mobile-menu-hide-videos">
+/* Na versão mobile, os vídeos dos cards no menu não devem aparecer */
+@media (max-width: 1024px) {
+  .nav__menu__menu__middle__expertise__img,
+  .nav__menu__menu__middle__expertise video,
+  .nav__menu__menu__middle__expertise__img video {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    height: 0 !important;
+    width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+}
+</style>
+<script id="custom-video-focus-controller">
+// Controlador de Reprodução Condicional:
+// 1. Só roda o vídeo do card ativo no momento em que a tela está sobre ele.
+// 2. Ao rolar para outro card, o anterior pausa e o novo toca em loop.
+// 3. Fora da seção de cards (Hero, About, Contato, Rodapé), todos os vídeos dos cards pausam.
+// 4. No menu desktop: o vídeo só roda em loop quando o usuário passar o mouse por cima do card.
+// 5. No menu mobile: os vídeos dos cards NÃO aparecem.
 (function() {
   var menuVideos = [
     'media/barbearia-login.mp4',
@@ -1014,49 +1036,107 @@ body.menu-open, html:has(body.menu-open) {
     'media/aCyD4ydWJ-7kSWKi_investments-716.mp4'
   ];
 
-  function forceLoop(video) {
+  // Helper para configurar loop contínuo garantido em qualquer vídeo
+  function setupLoop(video) {
     if (!video) return;
-    // Se o vídeo pertence ao menu e o menu está fechado, não reproduzir
-    if (video.closest('.nav__menu__menu') && !document.body.classList.contains('menu-open')) {
-      if (!video.paused) video.pause();
-      return;
-    }
-
     video.loop = true;
     video.muted = true;
     video.playsInline = true;
     video.setAttribute('loop', '');
     video.setAttribute('muted', '');
     video.setAttribute('playsinline', '');
-    video.setAttribute('autoplay', '');
 
     if (!video.__loopHooked) {
       video.__loopHooked = true;
       video.addEventListener('ended', function() {
-        this.currentTime = 0;
-        this.play().catch(function() {});
+        if (this.__shouldPlay) {
+          this.currentTime = 0;
+          this.play().catch(function() {});
+        }
       });
-      video.addEventListener('pause', function() {
-        var v = this;
-        setTimeout(function() {
-          if (v.paused && !v.ended) {
-            if (v.closest('.nav__menu__menu') && !document.body.classList.contains('menu-open')) {
-              return;
-            }
-            v.play().catch(function() {});
-          }
-        }, 150);
-      });
-    }
-
-    if (video.paused) {
-      video.play().catch(function() {});
     }
   }
 
-  function ensureMenuVideos() {
+  // Identifica com precisão o índice do card atualmente visível/ativo na tela (0, 1, 2 ou -1)
+  function getActiveCardIndex() {
+    var cards = document.querySelectorAll('.home__expertises__card');
+    if (!cards || !cards.length) return -1;
+
+    var winH = window.innerHeight || document.documentElement.clientHeight;
+    var section = document.querySelector('.home__expertises') || document.querySelector('.home__expertises__cards');
+    if (section) {
+      var sRect = section.getBoundingClientRect();
+      // Se a seção dos cards estiver totalmente fora do viewport (acima ou abaixo)
+      if (sRect.bottom <= winH * 0.15 || sRect.top >= winH * 0.85) {
+        return -1;
+      }
+    }
+
+    // Procura do último para o primeiro card (os cards posteriores sobrepõem os anteriores)
+    for (var i = cards.length - 1; i >= 0; i--) {
+      var card = cards[i];
+      var rect = card.getBoundingClientRect();
+
+      // O card deve estar na faixa ativa de visualização
+      var inView = (rect.top <= winH * 0.70 && rect.bottom >= winH * 0.20);
+      if (!inView) continue;
+
+      // Verifica se o container interno foi desbotado pelo GSAP quando coberto
+      var inner = card.querySelector('.home__expertises__card__inner__inner__inner');
+      if (inner) {
+        var op = parseFloat(window.getComputedStyle(inner).opacity);
+        if (!isNaN(op) && op < 0.2) {
+          continue; // Card já coberto e invisível
+        }
+      }
+
+      return i;
+    }
+
+    // Fallback via botão indicador de navegação caso o container esteja na tela
+    var navButtons = document.querySelectorAll('.home__expertises .page__nav__button');
+    for (var j = 0; j < navButtons.length; j++) {
+      if (navButtons[j].classList.contains('selected')) {
+        return j;
+      }
+    }
+
+    return -1;
+  }
+
+  // Atualiza reprodução dos vídeos dos cards principais da página
+  function updateCardVideos() {
+    var cards = document.querySelectorAll('.home__expertises__card');
+    if (!cards.length) return;
+
+    var activeIdx = getActiveCardIndex();
+
+    cards.forEach(function(card, idx) {
+      var vid = card.querySelector('video');
+      if (!vid) return;
+
+      setupLoop(vid);
+
+      if (idx === activeIdx) {
+        vid.__shouldPlay = true;
+        if (vid.paused) {
+          vid.play().catch(function() {});
+        }
+      } else {
+        vid.__shouldPlay = false;
+        if (!vid.paused) {
+          vid.pause();
+        }
+      }
+    });
+  }
+
+  // Gerencia vídeos no Menu Gaveta
+  function updateMenuVideos() {
     var isMenuOpen = document.body.classList.contains('menu-open');
+    var isMobile = (window.innerWidth <= 1024);
     var items = document.querySelectorAll('.nav__menu__menu__middle__expertise');
+
     items.forEach(function(item, idx) {
       if (idx >= menuVideos.length) return;
       var imgDiv = item.querySelector('.nav__menu__menu__middle__expertise__img');
@@ -1065,20 +1145,29 @@ body.menu-open, html:has(body.menu-open) {
       var vid = imgDiv.querySelector('video');
       var targetSrc = menuVideos[idx];
 
+      // Se for mobile, não deve aparecer nem tocar nenhum vídeo no menu
+      if (isMobile) {
+        if (vid) {
+          vid.__shouldPlay = false;
+          if (!vid.paused) vid.pause();
+          vid.style.display = 'none';
+        }
+        return;
+      }
+
+      // Versão Desktop: garante que o elemento de vídeo existe
       if (!vid) {
         vid = document.createElement('video');
         vid.muted = true;
         vid.playsInline = true;
         vid.loop = true;
-        vid.autoplay = true;
         vid.preload = 'auto';
         vid.crossOrigin = 'anonymous';
         vid.setAttribute('muted', '');
         vid.setAttribute('playsinline', '');
         vid.setAttribute('loop', '');
-        vid.setAttribute('autoplay', '');
         vid.setAttribute('data-v-3d548da1', '');
-        vid.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; pointer-events: none;';
+        vid.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; pointer-events: none; transition: opacity 0.4s ease;';
         vid.innerHTML = '<source type="video/mp4" src="' + targetSrc + '">';
         imgDiv.appendChild(vid);
       } else {
@@ -1092,49 +1181,91 @@ body.menu-open, html:has(body.menu-open) {
           }
           vid.load();
         }
-        vid.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; pointer-events: none;';
+        vid.style.display = '';
+        vid.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; pointer-events: none; transition: opacity 0.4s ease;';
       }
 
-      if (isMenuOpen) {
-        forceLoop(vid);
-      } else {
+      setupLoop(vid);
+
+      // Eventos de mouseenter / mouseleave no item do menu (apenas desktop)
+      if (!item.__hoverHooked) {
+        item.__hoverHooked = true;
+
+        item.addEventListener('mouseenter', function() {
+          if (window.innerWidth <= 1024) return;
+          if (!document.body.classList.contains('menu-open')) return;
+
+          // Pausa outros vídeos do menu
+          items.forEach(function(otherItem) {
+            if (otherItem !== item) {
+              var otherVid = otherItem.querySelector('video');
+              if (otherVid) {
+                otherVid.__shouldPlay = false;
+                if (!otherVid.paused) otherVid.pause();
+              }
+            }
+          });
+
+          // Toca este vídeo em loop
+          var currentVid = item.querySelector('video');
+          if (currentVid) {
+            currentVid.__shouldPlay = true;
+            currentVid.currentTime = 0;
+            currentVid.play().catch(function() {});
+          }
+        });
+
+        item.addEventListener('mouseleave', function() {
+          if (window.innerWidth <= 1024) return;
+          var currentVid = item.querySelector('video');
+          if (currentVid) {
+            currentVid.__shouldPlay = false;
+            if (!currentVid.paused) currentVid.pause();
+          }
+        });
+      }
+
+      // Se o menu estiver fechado, pausa o vídeo
+      if (!isMenuOpen) {
+        vid.__shouldPlay = false;
         if (!vid.paused) vid.pause();
       }
     });
   }
 
-  function checkVideos() {
-    var cardVids = document.querySelectorAll('.home__expertises__card video, .home__expertises__card__middle__video video');
-    cardVids.forEach(forceLoop);
-    ensureMenuVideos();
+  function tick() {
+    updateCardVideos();
+    updateMenuVideos();
   }
 
+  // Inicialização e Listeners
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', checkVideos);
+    document.addEventListener('DOMContentLoaded', tick);
   } else {
-    checkVideos();
+    tick();
   }
-  setInterval(checkVideos, 600);
 
-  // Observador para mudanças na classe do body (abrir/fechar menu)
+  window.addEventListener('scroll', updateCardVideos, { passive: true });
+  window.addEventListener('resize', tick, { passive: true });
+  setInterval(tick, 150);
+
+  // Observador de abertura/fechamento do menu
   if (window.MutationObserver) {
     var bodyObserver = new MutationObserver(function(mutations) {
       mutations.forEach(function(m) {
         if (m.attributeName === 'class') {
-          ensureMenuVideos();
+          updateMenuVideos();
         }
       });
     });
     bodyObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
   }
 
-  // Hook no clique dos botões do menu
   document.addEventListener('click', function(e) {
     if (e.target.closest('.nav__menu__button, .nav__menu__menu__close')) {
-      setTimeout(checkVideos, 50);
-      setTimeout(checkVideos, 200);
-      setTimeout(checkVideos, 500);
-      setTimeout(checkVideos, 900);
+      setTimeout(updateMenuVideos, 50);
+      setTimeout(updateMenuVideos, 250);
+      setTimeout(updateMenuVideos, 600);
     }
   }, true);
 })();
